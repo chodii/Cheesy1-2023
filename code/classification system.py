@@ -36,29 +36,38 @@ def main():
     dataset, labels, class_names = load_dataset(image_folder, image_size, num_classes)
     X_train, X_test, y_train, y_test = train_test_split(dataset, labels, test_size=0.2, random_state=42)
     
+    systematic(X_train, X_test, y_train, y_test, class_names)
+
+def systematic(X_train, X_test, y_train, y_test, class_names, pre_PCA=False, post_PCA=False, run_analysis=False):
     # PCA-
-    X_train, X_test = apply_PCA_to_input(X_train, X_test, target_size=None)
+    if pre_PCA:
+        X_train, X_test = apply_PCA_to_input(X_train, X_test, target_size=None)
     
     # CNN
     X_train_features, X_test_features = prepare_VVG16_model(X_train, X_test)
     
     # -PCA
-    X_train_features, X_test_features = apply_PCA_to_features(X_train_features, X_test_features)
+    if post_PCA:
+        X_train_features, X_test_features = apply_PCA_to_features(X_train_features, X_test_features)
     
     # Classification
     classifiers = create_classifiers(input_size_elm = X_train_features.shape[1])
-    classifier_name = 'rf'
-    #for classifier_name in classifiers.keys():
-    classifier = classifiers.get(classifier_name)
-    time_for_training = fit_classifier(classifier, X_train_features, y_train)
-    classifier_accuracy = classifier.score(X_test_features, y_test)
-    print("Accuracy of",classifier_name,":{:.3f}",classifier_accuracy, "\t training took:{:.5f}[s]", time_for_training)
+    
+    for classifier_name in classifiers.keys():
+        classifier = classifiers.get(classifier_name)
+        time_for_training = fit_classifier(classifier, X_train_features, y_train)
+        classifier_accuracy = classifier.score(X_test_features, y_test)
+        print("Accuracy of",classifier_name,":{:.3f}",classifier_accuracy, "\t training took:{:.5f}[s]", time_for_training)
 
     # XAI - LIME
-    #return
+    if run_analysis is False:
+        return
     result_folder = "./results/"
-    test_index = 1
-    explainer_L = explain(test_index, classifier_name, result_folder, classifiers, X_test_features, y_test, class_names, X_train_features=X_train_features, y_train=y_train)
+    explainer_L = None
+    for anal in run_analysis:
+        test_index = anal[0]
+        classifier_name = anal[1]
+        explainer_L = explain(test_index, classifier_name, result_folder, classifiers, X_test_features, y_test, class_names, X_train_features=X_train_features, y_train=y_train, explainer_L=explainer_L)
 
 def explain(test_index, classifier_name, result_folder, classifiers, X_test_features, y_test, class_names, X_train_features=None, y_train=None, explainer_L=None):
     classifier = classifiers.get(classifier_name)
