@@ -23,6 +23,10 @@ import time
 from our_ELM import ELMClassifier
 import cv2
 
+
+import lime
+from lime import lime_tabular
+
 def main():
     image_folder = '../data/food101/images/'  # Path to the folder containing the images
     image_size = (64, 64)  # Size to resize the input images
@@ -32,50 +36,50 @@ def main():
     dataset, labels, class_names = load_dataset(image_folder, image_size, num_classes)
     X_train, X_test, y_train, y_test = train_test_split(dataset, labels, test_size=0.2, random_state=42)
     
+    # PCA-
     X_train, X_test = apply_PCA_to_input(X_train, X_test, target_size=None)
     
-    train_features, test_features = prepare_VVG16_model(X_train, X_test)
-    train_features.shape
+    # CNN
+    X_train_features, X_test_features = prepare_VVG16_model(X_train, X_test)
     
-    classifiers = create_classifiers(input_size_elm = X_train.shape[1])
-    #class_name = 'elm'
-    for class_name in classifiers.keys():
-        classifier = classifiers.get(class_name)
-        time_for_training = fit_classifier(classifier, train_features, y_train)
-        classifier_accuracy = classifier.score(test_features, y_test)
-        print("Accuracy of",class_name,":{:.3f}",classifier_accuracy, "\t training took:{:.5f}[s]", time_for_training)
-
-
-def create_classifiers(input_size_elm):
-    # Creating an instance of each classifier
-    svm_classifier = SVC(probability=True)
-    rf_classifier = RandomForestClassifier()
-    knn_classifier = KNeighborsClassifier()
-    gb_classifier = GradientBoostingClassifier()
-    nb_classifier = GaussianNB()
-    dnn_classifier = MLPClassifier()
-    # The number of features after dimensionality reduction
-    #elm_classifier = ELMClassifier(input_size_elm, hidden_size = 100, output_size = 15)
+    # -PCA
+    X_train_features, X_test_features = apply_PCA_to_features(X_train_features, X_test_features)
     
-    classifiers = {
-        'svm':svm_classifier,
-        'rf':rf_classifier,
-        'knn':knn_classifier,
-        'gb':gb_classifier,
-        'nb':nb_classifier,
-        'dnn':dnn_classifier
-        #,'elm':elm_classifier
-        }
-    return classifiers
+    # Classification
+    classifiers = create_classifiers(input_size_elm = X_train_features.shape[1])
+    classifier_name = 'rf'
+    #for classifier_name in classifiers.keys():
+    classifier = classifiers.get(classifier_name)
+    time_for_training = fit_classifier(classifier, X_train_features, y_train)
+    classifier_accuracy = classifier.score(X_test_features, y_test)
+    print("Accuracy of",classifier_name,":{:.3f}",classifier_accuracy, "\t training took:{:.5f}[s]", time_for_training)
 
-def fit_classifier(classifier, X_train_features, y_train):
-    """
-    return: measured time
-    """
-    start = time.time()
-    classifier.fit(X_train_features, y_train)
-    end = time.time()
-    return end-start
+    # XAI - LIME
+    #return
+    result_folder = "./results/"
+    test_index = 1
+    explainer_L = explain(test_index, classifier_name, result_folder, classifiers, X_test_features, y_test, class_names, X_train_features=X_train_features, y_train=y_train)
+
+def explain(test_index, classifier_name, result_folder, classifiers, X_test_features, y_test, class_names, X_train_features=None, y_train=None, explainer_L=None):
+    classifier = classifiers.get(classifier_name)
+    test_datapoint = np.array(X_test_features[test_index])
+    num_classes = len(class_names)
+    
+    # Feature names as an index converted into string
+    num_features = len(test_datapoint)
+    if explainer_L is None:
+        feature_names = ["feature index "+str(n) for n in range(len(test_datapoint))]
+        explainer_L = lime_tabular.LimeTabularExplainer(training_data=X_train_features,
+                                                            training_labels=y_train,
+                                                          feature_names=feature_names,
+                                                          class_names=class_names,
+                                                          mode="classification")
+    model_explanation_L = explainer_L.explain_instance(data_row=test_datapoint,
+                                                     top_labels=num_classes,
+                                                     num_features=num_features,
+                                                     predict_fn=classifier.predict_proba)
+    model_explanation_L.save_to_file(result_folder+classifier_name+'_lime_'+y_test[test_index]+str(test_index)+'.html',show_table=True)
+    return explainer_L
 
 def preprocess_image(image_path, image_size):
     image = load_img(image_path, target_size=image_size)
@@ -152,19 +156,19 @@ def apply_PCA_to_input(X_train, X_test, n_components=200, target_size=(32,32,3))
 def prepare_VVG16_model(X_train, X_test):
     input_shape=X_train.shape[1:]
     cnn_model = VGG16(weights='imagenet', include_top=False, input_shape=input_shape)
-
+    
     # Preprocessing the dataset for the CNN model
     preprocessed_dataset_train = preprocess_input(X_train)
     preprocessed_dataset_test = preprocess_input(X_test)
     # Extracting features from the preprocessed dataset using the CNN model
     features_train = cnn_model.predict(preprocessed_dataset_train)
     features_test = cnn_model.predict(preprocessed_dataset_test)
-
+    
     cnn_model.save ('./VGG16_food_CNN_PCA_ELM.h5')
     
     flattened_features_train = features_train.reshape(features_train.shape[0], -1)
     flattened_features_test = features_test.reshape(features_test.shape[0], -1)
-   
+    
     return flattened_features_train, flattened_features_test
 
 def apply_PCA_to_features(flattened_features_train, flattened_features_test):
@@ -178,6 +182,36 @@ def apply_PCA_to_features(flattened_features_train, flattened_features_test):
     reduced_features_test= pca.fit_transform(normalized_features_test)
     return reduced_features_train, reduced_features_test
 
+def create_classifiers(input_size_elm):
+    # Creating an instance of each classifier
+    svm_classifier = SVC(probability=True)
+    rf_classifier = RandomForestClassifier()
+    knn_classifier = KNeighborsClassifier()
+    gb_classifier = GradientBoostingClassifier()
+    nb_classifier = GaussianNB()
+    dnn_classifier = MLPClassifier()
+    # The number of features after dimensionality reduction
+    elm_classifier = ELMClassifier(input_size_elm, hidden_size = 100, output_size = 15)
+    
+    classifiers = {
+        'svm':svm_classifier,
+        'rf':rf_classifier,
+        'knn':knn_classifier,
+        'gb':gb_classifier,
+        'nb':nb_classifier,
+        'dnn':dnn_classifier
+        ,'elm':elm_classifier
+        }
+    return classifiers
+
+def fit_classifier(classifier, X_train_features, y_train):
+    """
+    return: measured time
+    """
+    start = time.time()
+    classifier.fit(X_train_features, y_train)
+    end = time.time()
+    return end-start
 
 if __name__ == "__main__":
     main()
