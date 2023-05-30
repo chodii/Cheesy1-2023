@@ -32,9 +32,7 @@ def main():
     dataset, labels, class_names = load_dataset(image_folder, image_size, num_classes)
     X_train, X_test, y_train, y_test = train_test_split(dataset, labels, test_size=0.2, random_state=42)
     
-    X_train, X_test = apply_PCA_to_input(X_train, X_test)
-    
-    
+    X_train, X_test = apply_PCA_to_input(X_train, X_test, target_size=None)
     
     train_features, test_features = prepare_VVG16_model(X_train, X_test)
     train_features.shape
@@ -108,7 +106,7 @@ def load_dataset(image_folder, image_size, num_classes):
     labels = np.array(labels)
     return dataset, labels, class_names
 
-def apply_PCA_to_input(X_train, X_test, target_size=(32,32,3), n_components=200):
+def apply_PCA_to_input(X_train, X_test, n_components=200, target_size=(32,32,3)):
     num_channels = X_train.shape[-1]  # Get the number of channels
     
     # Reshape and apply PCA for each channel separately
@@ -139,6 +137,8 @@ def apply_PCA_to_input(X_train, X_test, target_size=(32,32,3), n_components=200)
         X_pca_train[:,:,:,channel] = sc_inv_pca_train
         X_pca_test[:,:,:,channel] = sc_inv_pca_test
         
+    if target_size is None:
+        return X_pca_train, X_pca_test
     # Resize the images to the target size
     resized_X_pca_train = np.zeros((X_train.shape[0],) + target_size)
     resized_X_pca_test = np.zeros((X_test.shape[0],) + target_size)
